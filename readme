@@ -1,0 +1,82 @@
+# ReviewSense
+
+> An end-to-end customer sentiment intelligence platform powered by NLP, fine-tuned RoBERTa, and Streamlit analytics.
+
+## Overview
+
+**ReviewSense** is a customer feedback analytics platform that analyzes customer reviews and converts unstructured feedback into actionable sentiment insights.
+
+The system uses a **fine-tuned RoBERTa transformer model** for three-class sentiment classification:
+
+- Positive
+- Neutral
+- Negative
+
+It also provides product-wise, brand-wise, and category-wise analytics through an interactive **Streamlit dashboard**.
+
+---
+
+## Key Features
+
+- Customer review sentiment analysis
+- Fine-tuned **RoBERTa** model
+- Rating-based initial sentiment labeling
+- Sentiment conflict detection between ratings and review text
+- Manual validation of conflicting reviews
+- Accuracy, Precision, Recall, and F1-score evaluation
+- Confidence scores for predictions
+- Product-wise sentiment analysis
+- Brand-wise performance analysis
+- Category-wise sentiment analysis
+- Sentiment trend analysis over time
+- Keyword frequency extraction
+- Interactive Streamlit dashboard
+- Role-based authentication:
+  - Admin
+  - Customer
+
+---
+
+## Project Workflow
+
+```text
+                    Customer Reviews
+                           |
+                           v
+                  Data Preprocessing
+                           |
+                           v
+                Rating-Based Sentiment
+                           |
+                           v
+                  Conflict Detection
+                           |
+                           v
+                   Manual Validation
+                           |
+                           v
+                  Validated Reviews
+                           |
+                           v
+                  Fine-tune RoBERTa
+                           |
+                           v
+             +-------------+-------------+
+             |             |             |
+             v             v             v
+          Accuracy     Precision      Recall
+             \             |             /
+              \            |            /
+                       F1 Score
+                           |
+                           v
+                 ReviewSense Model
+                           |
+                           v
+                Streamlit Dashboard
+                           |
+          +----------------+----------------+
+          |                |                |
+          v                v                v
+      Sentiment        Product KPIs     Keyword Analysis
+       Trends
