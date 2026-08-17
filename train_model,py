@@ -1,0 +1,495 @@
+import os
+
+import numpy as np
+import pandas as pd
+
+from datasets import Dataset
+
+from sklearn.model_selection import (
+    train_test_split
+)
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_fscore_support,
+    classification_report,
+    confusion_matrix
+)
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    DataCollatorWithPadding,
+    TrainingArguments,
+    Trainer
+)
+
+
+DATA_FILE = (
+    "data/customer_reviews.csv"
+)
+
+MODEL_DIR = (
+    "models/reviewsense-roberta"
+)
+
+MODEL_NAME = (
+    "FacebookAI/roberta-base"
+)
+
+
+LABEL2ID = {
+    "Negative": 0,
+    "Neutral": 1,
+    "Positive": 2
+}
+
+
+ID2LABEL = {
+    0: "Negative",
+    1: "Neutral",
+    2: "Positive"
+}
+
+
+# --------------------------------------------------
+# Load data
+# --------------------------------------------------
+
+df = pd.read_csv(
+    DATA_FILE
+)
+
+print(
+    "Dataset size:",
+    len(df)
+)
+
+
+# --------------------------------------------------
+# Column normalization
+# --------------------------------------------------
+
+df.columns = [
+    str(col).strip()
+    for col in df.columns
+]
+
+
+# --------------------------------------------------
+# Remove invalid rows
+# --------------------------------------------------
+
+df["Review"] = (
+    df["Review"]
+    .fillna("")
+    .astype(str)
+)
+
+df["Rating"] = pd.to_numeric(
+    df["Rating"],
+    errors="coerce"
+)
+
+df = df[
+    (df["Review"].str.strip() != "")
+    &
+    (df["Rating"].notna())
+]
+
+
+# --------------------------------------------------
+# Rating-based labels
+# --------------------------------------------------
+
+def rating_to_label(rating):
+
+    if rating <= 2:
+        return "Negative"
+
+    elif rating == 3:
+        return "Neutral"
+
+    else:
+        return "Positive"
+
+
+df["sentiment"] = (
+    df["Rating"]
+    .apply(rating_to_label)
+)
+
+
+print(
+    "\nSentiment distribution:"
+)
+
+print(
+    df["sentiment"]
+    .value_counts()
+)
+
+
+# --------------------------------------------------
+# Convert labels
+# --------------------------------------------------
+
+df["label"] = (
+    df["sentiment"]
+    .map(LABEL2ID)
+)
+
+
+# --------------------------------------------------
+# Train / validation / test split
+# --------------------------------------------------
+
+train_df, temp_df = train_test_split(
+    df,
+    test_size=0.30,
+    random_state=42,
+    stratify=df["label"]
+)
+
+validation_df, test_df = (
+    train_test_split(
+        temp_df,
+        test_size=0.50,
+        random_state=42,
+        stratify=temp_df["label"]
+    )
+)
+
+
+print("\nDataset split:")
+
+print(
+    "Training:",
+    len(train_df)
+)
+
+print(
+    "Validation:",
+    len(validation_df)
+)
+
+print(
+    "Test:",
+    len(test_df)
+)
+
+
+# --------------------------------------------------
+# Hugging Face datasets
+# --------------------------------------------------
+
+train_dataset = Dataset.from_pandas(
+    train_df[
+        ["Review", "label"]
+    ],
+    preserve_index=False
+)
+
+validation_dataset = Dataset.from_pandas(
+    validation_df[
+        ["Review", "label"]
+    ],
+    preserve_index=False
+)
+
+test_dataset = Dataset.from_pandas(
+    test_df[
+        ["Review", "label"]
+    ],
+    preserve_index=False
+)
+
+
+# --------------------------------------------------
+# Tokenizer
+# --------------------------------------------------
+
+tokenizer = (
+    AutoTokenizer
+    .from_pretrained(
+        MODEL_NAME
+    )
+)
+
+
+def tokenize(batch):
+
+    return tokenizer(
+        batch["Review"],
+        truncation=True,
+        max_length=256
+    )
+
+
+train_dataset = train_dataset.map(
+    tokenize,
+    batched=True
+)
+
+validation_dataset = (
+    validation_dataset.map(
+        tokenize,
+        batched=True
+    )
+)
+
+test_dataset = test_dataset.map(
+    tokenize,
+    batched=True
+)
+
+
+# --------------------------------------------------
+# Model
+# --------------------------------------------------
+
+model = (
+    AutoModelForSequenceClassification
+    .from_pretrained(
+        MODEL_NAME,
+        num_labels=3,
+        id2label=ID2LABEL,
+        label2id=LABEL2ID
+    )
+)
+
+
+# --------------------------------------------------
+# Metrics
+# --------------------------------------------------
+
+def compute_metrics(
+    eval_prediction
+):
+
+    logits, labels = (
+        eval_prediction
+    )
+
+    predictions = np.argmax(
+        logits,
+        axis=1
+    )
+
+    precision, recall, f1, _ = (
+        precision_recall_fscore_support(
+            labels,
+            predictions,
+            average="macro",
+            zero_division=0
+        )
+    )
+
+    accuracy = accuracy_score(
+        labels,
+        predictions
+    )
+
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+
+# --------------------------------------------------
+# Data collator
+# --------------------------------------------------
+
+data_collator = (
+    DataCollatorWithPadding(
+        tokenizer=tokenizer
+    )
+)
+
+
+# --------------------------------------------------
+# Training arguments
+# --------------------------------------------------
+
+training_args = TrainingArguments(
+
+    output_dir=MODEL_DIR,
+
+    learning_rate=2e-5,
+
+    per_device_train_batch_size=8,
+
+    per_device_eval_batch_size=8,
+
+    num_train_epochs=3,
+
+    weight_decay=0.01,
+
+    eval_strategy="epoch",
+
+    save_strategy="epoch",
+
+    load_best_model_at_end=True,
+
+    metric_for_best_model="f1",
+
+    greater_is_better=True,
+
+    logging_steps=25,
+
+    report_to="none",
+
+    save_total_limit=1
+)
+
+
+# --------------------------------------------------
+# Trainer
+# --------------------------------------------------
+
+trainer = Trainer(
+
+    model=model,
+
+    args=training_args,
+
+    train_dataset=train_dataset,
+
+    eval_dataset=validation_dataset,
+
+    processing_class=tokenizer,
+
+    data_collator=data_collator,
+
+    compute_metrics=compute_metrics
+)
+
+
+# --------------------------------------------------
+# Train
+# --------------------------------------------------
+
+print(
+    "\nStarting RoBERTa training..."
+)
+
+trainer.train()
+
+
+# --------------------------------------------------
+# Evaluate
+# --------------------------------------------------
+
+print(
+    "\nEvaluating on test dataset..."
+)
+
+predictions = (
+    trainer.predict(
+        test_dataset
+    )
+)
+
+predicted_labels = np.argmax(
+    predictions.predictions,
+    axis=1
+)
+
+true_labels = (
+    predictions.label_ids
+)
+
+
+accuracy = accuracy_score(
+    true_labels,
+    predicted_labels
+)
+
+precision, recall, f1, _ = (
+    precision_recall_fscore_support(
+        true_labels,
+        predicted_labels,
+        average="macro",
+        zero_division=0
+    )
+)
+
+
+print("\n==============================")
+print("      REVIEW SENSE MODEL")
+print("==============================")
+
+print(
+    f"Accuracy : {accuracy:.4f}"
+)
+
+print(
+    f"Precision: {precision:.4f}"
+)
+
+print(
+    f"Recall   : {recall:.4f}"
+)
+
+print(
+    f"F1 Score : {f1:.4f}"
+)
+
+
+print(
+    "\nClassification Report:"
+)
+
+print(
+    classification_report(
+        true_labels,
+        predicted_labels,
+        target_names=[
+            "Negative",
+            "Neutral",
+            "Positive"
+        ],
+        zero_division=0
+    )
+)
+
+
+print(
+    "\nConfusion Matrix:"
+)
+
+print(
+    confusion_matrix(
+        true_labels,
+        predicted_labels
+    )
+)
+
+
+# --------------------------------------------------
+# Save model
+# --------------------------------------------------
+
+os.makedirs(
+    MODEL_DIR,
+    exist_ok=True
+)
+
+trainer.save_model(
+    MODEL_DIR
+)
+
+tokenizer.save_pretrained(
+    MODEL_DIR
+)
+
+
+print(
+    "\nModel saved to:"
+)
+
+print(
+    MODEL_DIR
+)
